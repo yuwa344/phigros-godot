@@ -1,0 +1,15 @@
+# Godot
+godot:
+  - .godot/
+.build/
+build/
+shot_*.png
+
+# Godot 4
+.godot/
+*.translation
+export_credentials.cfg
+
+# 系统
+desktop.ini
+Thumbs.db

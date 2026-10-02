@@ -1,0 +1,54 @@
+# .github/workflows/ios-unsigned-ipa.yml
+# Godot 4.7.2 iOS 云打包：产出未签名 IPA（供全能签/Sideloadly 重签）
+# 用法：把 phigros-godot 项目内容（含本文件）推到 GitHub 仓库，Actions 里手动 Run 或 push 触发
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot 4.7.2 + export templates
+        run: |
+          BASE=https://github.com/godotengine/godot/releases/download/4.7.2-stable
+          curl -L -o godot.zip "$BASE/Godot_v4.7.2-stable_macos.universal.zip"
+          unzip -oq godot.zip
+          GODOT_BIN="$PWD/Godot_v4.7.2-stable_macos.universal/Godot.app/Contents/MacOS/Godot"
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
+          curl -L -o templates.tpz "$BASE/Godot_v4.7.2-stable_export_templates.tpz"
+          unzip -oq templates.tpz -d tpl
+          mkdir -p "$HOME/Library/Application Support/Godot/export_templates"
+          mv tpl/templates "$HOME/Library/Application Support/Godot/export_templates/4.7.2.stable"
+
+      - name: Import assets
+        run: "$GODOT_BIN" --headless --path . --import
+
+      - name: Export iOS Xcode project
+        run: "$GODOT_BIN" --headless --path . --export-release "iOS" build/ios_xcode
+
+      - name: Build unsigned IPA
+        run: |
+          cd build/ios_xcode
+          PROJ=$(ls *.xcodeproj | head -1)
+          SCHEME=$(basename "$PROJ" .xcodeproj)
+          xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Release \
+            -sdk iphoneos -derivedDataPath dd build CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY=""
+          APP=$(find dd/Build/Products/Release-iphoneos -name "*.app" | head -1)
+          echo "APP=$APP"
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry PhigrosGodot-unsigned.ipa Payload
+          cd ../..
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhigrosGodot-unsigned-ipa
+          path: build/ios_xcode/PhigrosGodot-unsigned.ipa

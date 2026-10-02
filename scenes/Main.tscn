@@ -1,0 +1,20 @@
+[gd_scene load_steps=3 format=3 uid="uid://phigros_main"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/game.gd" id="2"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1")
+
+[node name="Game" type="Node2D" parent="."]
+script = ExtResource("2")
+
+[node name="LineLayer" type="Node2D" parent="Game"]
+
+[node name="NoteLayer" type="Node2D" parent="Game"]
+
+[node name="Music" type="AudioStreamPlayer" parent="Game"]
+
+[node name="SFX" type="AudioStreamPlayer" parent="Game"]
+
+[node name="HUD" type="CanvasLayer" parent="Game"]
