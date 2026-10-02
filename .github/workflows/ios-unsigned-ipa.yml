@@ -1,6 +1,4 @@
 # .github/workflows/ios-unsigned-ipa.yml
-# Godot 4.7.2 iOS 云打包：产出未签名 IPA（供全能签/Sideloadly 重签）
-# 用法：把项目推到 GitHub 仓库，Actions 里手动 Run 或 push 触发
 name: Build unsigned iOS IPA
 
 on:
@@ -31,7 +29,6 @@ jobs:
 
           echo "=== Unzip Godot ==="
           unzip -q godot.zip -d godot
-          echo "--- top level ---"
           ls -la godot
 
           GODOT_BIN="$(find "$PWD/godot" -type f -name Godot -path '*/Contents/MacOS/*' | head -1)"
@@ -41,7 +38,6 @@ jobs:
           fi
           chmod +x "$GODOT_BIN"
           echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
-          echo "--- Godot version ---"
           "$GODOT_BIN" --version
 
           echo "=== Download export templates ==="
@@ -50,26 +46,19 @@ jobs:
 
           echo "=== Unzip templates ==="
           unzip -q templates.tpz -d tpl
-          echo "--- tpl contents ---"
           ls -la tpl
 
           TEMPLATE_DIR="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION_DOT}"
           mkdir -p "$TEMPLATE_DIR"
           mv tpl/templates/* "$TEMPLATE_DIR/"
-          echo "--- template dir ---"
           ls -la "$TEMPLATE_DIR" | head -20
 
       - name: Prepare iOS export preset
         run: |
           set -euo pipefail
-
-          # 备份用户原有预设（如果有）
           if [ -f export_presets.cfg ]; then
             cp export_presets.cfg export_presets.cfg.user-backup
           fi
-
-          # 始终写入我们自己的 iOS 预设，保证 team_id / 路径齐全
-          # 注意：用 echo 逐行写入，避免 heredoc 的 YAML 缩进问题
           {
             echo '[preset.0]'
             echo ''
@@ -114,8 +103,6 @@ jobs:
             echo 'capabilities/performance_gaming_tier=false'
             echo 'capabilities/performance_a12=false'
           } > export_presets.cfg
-
-          echo "=== export_presets.cfg ==="
           cat export_presets.cfg
 
       - name: Import assets
@@ -125,15 +112,26 @@ jobs:
       - name: Export iOS Xcode project
         run: |
           set -euo pipefail
-          rm -rf build/ios_xcode
+          rm -rf build
           mkdir -p build
           "$GODOT_BIN" --headless --path . --export-release "$IOS_PRESET" build/ios_xcode
+          echo "=== build/ contents ==="
+          ls -la build/
 
       - name: Build unsigned IPA
         run: |
           set -euo pipefail
-          cd build/ios_xcode
-          PROJ=$(ls *.xcodeproj | head -1)
+          cd build
+
+          echo "=== build/ contents ==="
+          ls -la
+
+          PROJ_PATH=$(find . -maxdepth 1 -name "*.xcodeproj" -type d | head -1)
+          if [ -z "$PROJ_PATH" ]; then
+            echo "ERROR: no .xcodeproj found in build/"
+            exit 1
+          fi
+          PROJ=$(basename "$PROJ_PATH")
           SCHEME=$(basename "$PROJ" .xcodeproj)
           echo "PROJ=$PROJ  SCHEME=$SCHEME"
 
@@ -157,11 +155,12 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry PhigrosGodot-unsigned.ipa Payload
           ls -la PhigrosGodot-unsigned.ipa
-          cd ../..
+
+          mv PhigrosGodot-unsigned.ipa "$GITHUB_WORKSPACE/PhigrosGodot-unsigned.ipa"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: PhigrosGodot-unsigned-ipa
-          path: build/ios_xcode/PhigrosGodot-unsigned.ipa
+          path: PhigrosGodot-unsigned.ipa
           if-no-files-found: error
