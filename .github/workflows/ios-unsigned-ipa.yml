@@ -1,9 +1,75 @@
-- name: Prepare iOS export preset
+# .github/workflows/ios-unsigned-ipa.yml
+# Godot 4.7.2 iOS 云打包：产出未签名 IPA（供全能签/Sideloadly 重签）
+# 用法：把项目推到 GitHub 仓库，Actions 里手动 Run 或 push 触发
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+env:
+  GODOT_VERSION: 4.7.2-stable
+  GODOT_VERSION_DOT: 4.7.2.stable
+  IOS_PRESET: iOS
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot + export templates
         run: |
           set -euo pipefail
+          BASE=https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}
+
+          echo "=== Download Godot ==="
+          curl -fL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}_macos.universal.zip"
+          file godot.zip
+
+          echo "=== Unzip Godot ==="
+          unzip -q godot.zip -d godot
+          echo "--- top level ---"
+          ls -la godot
+
+          GODOT_BIN="$(find "$PWD/godot" -type f -name Godot -path '*/Contents/MacOS/*' | head -1)"
+          if [ -z "$GODOT_BIN" ]; then
+            echo "ERROR: Godot executable not found under godot/"
+            exit 1
+          fi
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
+          echo "--- Godot version ---"
+          "$GODOT_BIN" --version
+
+          echo "=== Download export templates ==="
+          curl -fL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          file templates.tpz
+
+          echo "=== Unzip templates ==="
+          unzip -q templates.tpz -d tpl
+          echo "--- tpl contents ---"
+          ls -la tpl
+
+          TEMPLATE_DIR="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION_DOT}"
+          mkdir -p "$TEMPLATE_DIR"
+          mv tpl/templates/* "$TEMPLATE_DIR/"
+          echo "--- template dir ---"
+          ls -la "$TEMPLATE_DIR" | head -20
+
+      - name: Prepare iOS export preset
+        run: |
+          set -euo pipefail
+
+          # 备份用户原有预设（如果有）
           if [ -f export_presets.cfg ]; then
             cp export_presets.cfg export_presets.cfg.user-backup
           fi
+
+          # 始终写入我们自己的 iOS 预设，保证 team_id / 路径齐全
+          # 注意：用 echo 逐行写入，避免 heredoc 的 YAML 缩进问题
           {
             echo '[preset.0]'
             echo ''
@@ -51,3 +117,51 @@
 
           echo "=== export_presets.cfg ==="
           cat export_presets.cfg
+
+      - name: Import assets
+        run: |
+          "$GODOT_BIN" --headless --path . --import || true
+
+      - name: Export iOS Xcode project
+        run: |
+          set -euo pipefail
+          rm -rf build/ios_xcode
+          mkdir -p build
+          "$GODOT_BIN" --headless --path . --export-release "$IOS_PRESET" build/ios_xcode
+
+      - name: Build unsigned IPA
+        run: |
+          set -euo pipefail
+          cd build/ios_xcode
+          PROJ=$(ls *.xcodeproj | head -1)
+          SCHEME=$(basename "$PROJ" .xcodeproj)
+          echo "PROJ=$PROJ  SCHEME=$SCHEME"
+
+          xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Release \
+            -sdk iphoneos -derivedDataPath dd build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+          APP=$(find dd/Build/Products/Release-iphoneos -name "*.app" | head -1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: .app not found"
+            exit 1
+          fi
+          echo "APP=$APP"
+
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry PhigrosGodot-unsigned.ipa Payload
+          ls -la PhigrosGodot-unsigned.ipa
+          cd ../..
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhigrosGodot-unsigned-ipa
+          path: build/ios_xcode/PhigrosGodot-unsigned.ipa
+          if-no-files-found: error
